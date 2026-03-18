@@ -57,6 +57,23 @@ class AzureOpenAIConnector:
         ]
         return self.chat_completion(messages, temperature=temperature, max_tokens=max_tokens)
 
+    def chat_completion_raw(
+        self,
+        messages: list[dict],
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+        **kwargs,
+    ):
+        """Returns the full ChatCompletionMessage object (needed for tool_calls)."""
+        response = self.client.chat.completions.create(
+            model=self.deployment_name,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        return response.choices[0].message
+
     def embedding(self, text: str, embedding_deployment: Optional[str] = None) -> list[float]:
         deployment = embedding_deployment or os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
         response = self.client.embeddings.create(
