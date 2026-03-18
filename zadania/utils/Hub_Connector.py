@@ -20,16 +20,34 @@ class HubConnector:
             "apikey": self.api_key,
             "answer": data
         }
+        print(f"Sending verification request to {url} with payload: \n{payload} \n\n")
         response = requests.post(url, json=payload)
-        response.raise_for_status()
-        return response.json()
+        try:
+            body = response.json()
+        except Exception:
+            body = response.text
+        print(f"Response CODE: {response.status_code} | BODY: {body} \n\n")
+        return body
 
-    def receive_data(self, endpoint: str, authorize: bool = True):
+    def receive_data(self, endpoint: str, authorize: bool = True, type = "get"):
         url = f"{self.base_url}{endpoint}"
         if authorize:
             url = f"{self.base_url}/data/{self.api_key}{endpoint}"
         else:
             url = f"{self.base_url}/data{endpoint}"
-        response = requests.get(url)
+        response = None 
+        if type == "get":
+            response = requests.get(url)
+        elif type == "post":
+            response = requests.post(url)
+        else:            
+            raise ValueError("Unsupported request type")
         response.raise_for_status()
         return response
+    
+    def api_post_request(self, endpoint: str, data: dict):
+        url = f"{self.base_url}/api{endpoint}"
+        data["apikey"] = self.api_key
+        response = requests.post(url, json=data)
+        response.raise_for_status()
+        return response.json()

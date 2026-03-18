@@ -187,6 +187,10 @@ def main():
     print("\nWysyłanie odpowiedzi...")
     result = hub.verify("people", answer)
     print(f"Odpowiedź z serwera: {result}")
+    
+    with open("answer.json", "w", encoding="utf-8") as f:
+        json.dump(answer, f, indent=2, ensure_ascii=False)
+    print("Odpowiedź zapisana do answer.json")
 
 
 if __name__ == "__main__":
