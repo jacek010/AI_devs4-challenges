@@ -69,6 +69,15 @@ class ConversationHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(response_body)))
             self.end_headers()
             self.wfile.write(response_body)
+        elif self.path == "/status":
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length)
+            print("[STATUS] Headers:")
+            for key, value in self.headers.items():
+                print(f"  {key}: {value}")
+            print(f"[STATUS] Payload: {body.decode('utf-8', errors='replace')}")
+            self.send_response(200)
+            self.end_headers()
         else:
             self.send_response(404)
             self.end_headers()
