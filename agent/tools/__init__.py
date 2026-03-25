@@ -7,11 +7,11 @@ Aby dodać nowe narzędzie:
   Gotowe — agent automatycznie je zobaczy.
 """
 
-from tools import http, vision, hub, files, code, search
+from tools import http, vision, hub, files, code, search, sleep
 
 # ─── Lista modułów z narzędziami ──────────────────────────────
 # Dodaj tu nowe moduły aby agent automatycznie je widział.
-_MODULES = [http, vision, hub, files, code, search]
+_MODULES = [http, vision, hub, files, code, search, sleep]
 
 # ─── Budowanie rejestru ───────────────────────────────────────
 TOOLS: list[dict]        = []

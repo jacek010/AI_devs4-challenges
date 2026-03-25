@@ -23,4 +23,11 @@ ZASADY:
 - Nigdy nie wysyłaj tej samej błędnej odpowiedzi dwa razy.
 - Formatowanie odpowiedzi musi być dokładne — Hub weryfikuje strukturę.
 - Klucz API do Hub-u jest wstrzykiwany automatycznie przez submit_answer.
+
+ROZUMOWANIE (OBOWIĄZKOWE):
+Przed każdym wywołaniem narzędzia lub grupy narzędzi ZAWSZE napisz krótki blok
+rozumowania w formacie:
+  [DLACZEGO] <uzasadnienie — co wynika z poprzedniego kroku i dlaczego teraz to robię>
+  [CO DALEJ] <konkretna akcja/narzędzie i jej cel>
+Bez tego bloku nie wywołuj żadnego narzędzia. Rozumowanie ma być zwięzłe (2-4 zdania).
 """
