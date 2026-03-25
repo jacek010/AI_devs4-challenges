@@ -1,9 +1,30 @@
 import json
+import re
 from openai import AzureOpenAI
 import config
 import workspace as ws
 from prompts import SYSTEM_PROMPT
 from tools import TOOLS, TOOL_MAP
+
+_FLG_RE = re.compile(r'\{FLG:[^}]+\}')
+
+
+def _detect_flags(text: str, source: str, log) -> None:
+    """Wykrywa wzorce {FLG:...} w tekście i zapisuje je do output/flags.txt."""
+    found = _FLG_RE.findall(text)
+    if not found:
+        return
+    flags_file = ws.root() / "output" / "flags.txt"
+    with flags_file.open("a", encoding="utf-8") as f:
+        for flag in found:
+            f.write(f"{flag}  # źródło: {source}\n")
+    for flag in found:
+        log(f"\n\033[1;33m{'═' * 55}\033[0m")
+        log(f"\033[1;33m  🚩 FLAGA WYKRYTA: {flag}\033[0m")
+        log(f"\033[1;33m     Źródło: {source}\033[0m")
+        log(f"\033[1;33m     Zapisano do: output/flags.txt\033[0m")
+        log(f"\033[1;33m{'═' * 55}\033[0m")
+    ws.log("FLAG_DETECTED", f"Źródło: {source}  |  Flagi: {', '.join(found)}")
 
 # ─── Kolory ANSI ──────────────────────────────────────────────
 _R  = "\033[0m"       # reset
@@ -66,6 +87,7 @@ def run(task_text: str, verbose: bool = True) -> str | None:
             log(f"{_YL}╚{'═' * 53}╝{_R}")
             for line in msg.content.splitlines():
                 log(f"{_YL}   {line}{_R}")
+            _detect_flags(msg.content, f"agent/iter{i}", log)
 
         # Agent skończył — brak wywołań narzędzi
         if not msg.tool_calls:
@@ -101,7 +123,7 @@ def _call_tool(name: str, args: dict, log) -> str:
     log(f"{color}│  🔧 Narzędzie: {_B}{name}{_R}{color}(){_R}")
     for k, v in args.items():
         v_str = str(v)
-        log(f"{color}│     {k}: {v_str[:120]}{'…' if len(v_str) > 120 else ''}{_R}")
+        log(f"{color}│     {k}: {v_str}{_R}")
     log(f"{color}└{'─' * 53}┘{_R}")
 
     if is_sleep:
@@ -118,6 +140,7 @@ def _call_tool(name: str, args: dict, log) -> str:
             result = f"TOOL_ERROR [{name}]: {e}"
 
     r_str = str(result)
+    _detect_flags(r_str, f"tool/{name}", log)
     err   = r_str.startswith(("UNKNOWN_TOOL", "TOOL_ERROR", "HTTP_GET_ERROR", "HTTP_POST_ERROR"))
     res_color = _RE if err else _GR
 

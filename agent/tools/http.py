@@ -1,14 +1,21 @@
 import json
 import requests
 import workspace as ws
+import config
 
 
-def http_get(url: str, force_refresh: bool = False) -> str:
+def http_get(url: str, force_refresh: bool = False, authorize: bool = False) -> str:
     """
     Pobiera zasób tekstowy (MD, JSON, HTML, TXT) z URL.
     Wynik jest cache'owany — kolejne wywołania zwracają wersję z dysku.
     Użyj force_refresh=true tylko gdy potrzebujesz świeżych danych.
+    Użyj authorize=true gdy endpoint /data/ wymaga klucza API —
+    wtedy podaj sam endpoint (np. /plik.json), a pełny URL zostanie
+    zbudowany jako {HUB_BASE_URL}/data/{HUB_API_KEY}{endpoint}.
     """
+    if authorize:
+        url = f"{config.HUB_BASE_URL}/data/{config.HUB_API_KEY}{url}"
+
     key = ws.cache_key(url)
 
     if not force_refresh:
@@ -70,8 +77,19 @@ DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string"},
+                    "url": {
+                        "type": "string",
+                        "description": "Pełny URL lub sam endpoint (np. /plik.json) gdy authorize=true",
+                    },
                     "force_refresh": {"type": "boolean", "default": False},
+                    "authorize": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "Gdy true, traktuje url jako endpoint i buduje pełny URL: "
+                            "{HUB_BASE_URL}/data/{HUB_API_KEY}{endpoint}"
+                        ),
+                    },
                 },
                 "required": ["url"],
             },
