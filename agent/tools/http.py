@@ -56,11 +56,14 @@ def http_get(url: str, force_refresh: bool = False, authorize: bool = False) -> 
     return content
 
 
-def http_post(url: str, payload: dict, save_as: str = "") -> str:
+def http_post(url: str, payload: dict, save_as: str = "", authorize: bool = False) -> str:
     """
     Wysyła POST z payloadem JSON.
     Podaj save_as (nazwa pliku) aby zapisać odpowiedź do output/.
+    Użyj authorize=true aby automatycznie wstrzyknąć apikey z konfiguracji do payloadu.
     """
+    if authorize:
+        payload = {"apikey": config.HUB_API_KEY, **payload}
     if _is_image_url(url):
         return (
             "HTTP_POST_ERROR: URL wskazuje na plik graficzny — użyj read_image() zamiast http_post(). "
@@ -125,7 +128,8 @@ DEFINITIONS = [
             "name": "http_post",
             "description": (
                 "Wysyła POST z JSON payloadem. "
-                "Wynik można zapisać do output/ podając save_as."
+                "Wynik można zapisać do output/ podając save_as. "
+                "Użyj authorize=true aby automatycznie wstrzyknąć apikey do payloadu."
             ),
             "parameters": {
                 "type": "object",
@@ -136,6 +140,11 @@ DEFINITIONS = [
                         "type": "string",
                         "default": "",
                         "description": "Opcjonalna nazwa pliku w output/",
+                    },
+                    "authorize": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Gdy true, automatycznie dodaje apikey z konfiguracji do payloadu",
                     },
                 },
                 "required": ["url", "payload"],
