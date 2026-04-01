@@ -7,11 +7,12 @@ Aby dodać nowe narzędzie:
   Gotowe — agent automatycznie je zobaczy.
 """
 
-from tools import http, vision, hub, files, code, search, sleep, tokenizer
+from tools import http, hub, files, code, search, sleep, tokenizer, delegate, reset
 
 # ─── Lista modułów z narzędziami ──────────────────────────────
 # Dodaj tu nowe moduły aby agent automatycznie je widział.
-_MODULES = [http, vision, hub, files, code, search, sleep, tokenizer]
+# UWAGA: vision i cv_tools są dostępne TYLKO w vision subagent (subagents/vision.py)
+_MODULES = [http, hub, files, code, search, sleep, tokenizer, delegate, reset]
 
 # ─── Budowanie rejestru ───────────────────────────────────────
 TOOLS: list[dict]        = []

@@ -9,13 +9,18 @@ STRATEGIA PRACY:
    - Skąd pobrać dane (URL-e, dokumenty)
    - Nazwę zadania (task name) do submit_answer
    - Wymagany format odpowiedzi
-3. Pobieraj zasoby (http_get, read_image_url). ZAWSZE:
-   - Czytaj wszystkie wskazane pliki, w tym dyrektywy [include file="..."]
-   - Pobieraj pliki graficzne przez read_image_url (nie pomijaj!)
+3. Pobieraj zasoby. ZAWSZE:
+   - Czytaj wszystkie wskazane pliki tekstowe przez http_get lub read_file,
+     w tym dyrektywy [include file="..."]
+   - Pliki graficzne (PNG, JPG itp.) NIGDY nie są dostępne przez read_file.
+     Do pobrania i analizy DOWOLNEGO obrazu użyj ZAWSZE delegate_vision_task.
+     Przekaż subagentowi: URL obrazu (lub authorize=true dla chronionego endpointu),
+     co dokładnie przeanalizować i oczekiwany format wyniku.
    - Gdy URL zawiera placeholder "tutaj-twój-klucz" lub wymaga klucza API
-     (ścieżka /data/{apikey}/...), użyj http_get z authorize=true podając
+     (cieżka /data/{apikey}/...), użyj http_get z authorize=true podając
      sam endpoint, np. http_get("/plik.csv", authorize=True) — klucz i
-     base URL zostaną podstawione automatycznie.
+     base URL zostaną podstawione automatycznie. Dla obrazów pod takim
+     endpointem przekaż endpoint do delegate_vision_task z authorize=true.
    - Zapisuj ważne wyniki pośrednie przez write_file
 4. Obliczaj i formatuj przez python_eval gdy potrzebne.
 5. Zapisz gotową odpowiedź przez write_file zanim wyślesz.
@@ -28,6 +33,17 @@ ZASADY:
 - Formatowanie odpowiedzi musi być dokładne — Hub weryfikuje strukturę.
 - Klucz API do Hub-u jest wstrzykiwany automatycznie przez submit_answer
   oraz przez http_get(authorize=True) — nigdy nie wstawiaj go ręcznie w URL.
+- Używaj delegate_vision_task gdy potrzebujesz dogłębnej analizy wizualnej.
+  Podaj subagentowi pełny opis: co analizować, URL-e obrazów, oczekiwany format.
+  Subagent działa niezależnie i zwraca gotowy wynik — nie ma dostępu do Hub-u.
+- Zadanie jest zweryfikowane jako poprawne tylko gdy Hub odpowie sukcesem. 
+  Dopóki Hub nie zwróci flagi i kodu 0 zadanie nie jest zakończone.
+- Jeśli utknąłeś: wielokrotnie wysyłałeś błędne odpowiedzi i nie wiesz jak to naprawić,
+  lub wyczerpałeś wszystkie pomysły — wywołaj request_reset(reason=...) podając
+  KONKRETNY powód (co próbowałeś, dlaczego nie działało). Runner wygeneruje
+  podsumowanie sesji i zapyta użytkownika o akceptację resetu. Po potwierdzeniu
+  kontekst zostanie wyczyszczony, a wnioski z tej sesji trafią do nowego system
+  prompt — będziesz mógł się do nich odwołać i unikać tych samych błędów.
 
 ROZUMOWANIE (OBOWIĄZKOWE):
 Przed każdym wywołaniem narzędzia lub grupy narzędzi ZAWSZE napisz krótki blok

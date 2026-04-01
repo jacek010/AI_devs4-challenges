@@ -3,6 +3,16 @@ import requests
 import workspace as ws
 import config
 
+_IMAGE_EXTENSIONS = {
+    "png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "tif", "svg", "ico", "avif",
+}
+
+
+def _is_image_url(url: str) -> bool:
+    """Sprawdza czy URL wskazuje na plik graficzny na podstawie rozszerzenia."""
+    ext = url.split("?")[0].split(".")[-1].lower()
+    return ext in _IMAGE_EXTENSIONS
+
 
 def http_get(url: str, force_refresh: bool = False, authorize: bool = False) -> str:
     """
@@ -14,7 +24,15 @@ def http_get(url: str, force_refresh: bool = False, authorize: bool = False) -> 
     zbudowany jako {HUB_BASE_URL}/data/{HUB_API_KEY}{endpoint}.
     """
     if authorize:
+        if not url.startswith("/"):
+            url = "/" + url
         url = f"{config.HUB_BASE_URL}/data/{config.HUB_API_KEY}{url}"
+
+    if _is_image_url(url):
+        return (
+            "HTTP_GET_ERROR: URL wskazuje na plik graficzny — użyj read_image() zamiast http_get(). "
+            "http_get() służy wyłącznie do pobierania zasobów tekstowych (JSON, HTML, MD, TXT)."
+        )
 
     key = ws.cache_key(url)
 
@@ -43,6 +61,12 @@ def http_post(url: str, payload: dict, save_as: str = "") -> str:
     Wysyła POST z payloadem JSON.
     Podaj save_as (nazwa pliku) aby zapisać odpowiedź do output/.
     """
+    if _is_image_url(url):
+        return (
+            "HTTP_POST_ERROR: URL wskazuje na plik graficzny — użyj read_image() zamiast http_post(). "
+            "http_post() służy wyłącznie do wysyłania żądań JSON."
+        )
+
     try:
         resp = requests.post(url, json=payload, timeout=30)
         try:

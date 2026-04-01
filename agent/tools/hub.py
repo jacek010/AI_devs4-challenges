@@ -25,7 +25,10 @@ DEFINITIONS = [
             "description": (
                 "Wysyła finalną odpowiedź do hub.ag3nts.org/verify. "
                 "Używaj gdy odpowiedź jest kompletna. "
-                "Jeśli Hub zwróci błąd — przeczytaj go i popraw odpowiedź."
+                "Jeśli Hub zwróci błąd — przeczytaj go i popraw odpowiedź. "
+                "Nigdy Ty nie wysyłasz flagi, FLG moze byc tylko w odpowiedzi Huba."
+                "Zadanie jest zweryfikowane jako poprawne tylko gdy Hub odpowie sukcesem."
+                "Dopóki Hub nie zwróci flagi i kodu 0 zadanie nie jest zakończone."
             ),
             "parameters": {
                 "type": "object",

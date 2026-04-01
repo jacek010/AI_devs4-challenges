@@ -12,11 +12,24 @@ def write_file(filename: str, content: str) -> str:
     return f"Zapisano: {path}"
 
 
+_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff", "svg"}
+
+
 def read_file(filename: str) -> str:
     """
-    Odczytuje wcześniej pobrany lub zapisany plik z workspace.
+    Odczytuje wcześniej pobrany lub zapisany plik tekstowy z workspace.
     Przeszukuje output/ i cache/. Obsługuje częściowe dopasowanie nazwy.
+    NIE służy do obrazów — do analizy PNG/JPG użyj delegate_vision_task.
     """
+    # Wykryj pliki graficzne i od razu zwroć pomocny komunikat
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in _IMAGE_EXTENSIONS:
+        return (
+            f"IMAGE_FILE_ERROR: '{filename}' to plik graficzny — "
+            "read_file() obsługuje wyłącznie pliki tekstowe. "
+            "Aby pobrać i przeanalizować obraz użyj delegate_vision_task() "
+            "podając URL obrazu oraz oczekiwany format wyniku."
+        )
     result = ws.find_file(filename)
     if result:
         ws.log("READ_FILE", filename, result)

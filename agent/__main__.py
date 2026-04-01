@@ -25,6 +25,8 @@ def main():
     print(f"     ├── history.md   (log operacji)")
     print(f"     ├── cache/       (pobrane zasoby)")
     print(f"     └── output/      (wyniki agenta)")
+    print(f"{'═' * 55}")
+    print(f"  🤖 Subagenci: vision")
     print(f"{'═' * 55}\n")
 
     runner.run(task_text)

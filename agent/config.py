@@ -16,6 +16,6 @@ HUB_VERIFY_URL = "https://hub.ag3nts.org/verify"
 
 
 # ─── Agent ────────────────────────────────────────────────────
-MAX_ITERATIONS = 30
+MAX_ITERATIONS = 40
 LLM_TEMPERATURE = 0.1
 LLM_MAX_TOKENS  = 4096

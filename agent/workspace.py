@@ -113,7 +113,11 @@ def cache_read_bytes(key: str) -> bytes | None:
 
 def output_write(filename: str, content: str) -> Path:
     """Zapisuje plik do output/."""
+    # Strip redundant output/ prefix to avoid output/output/ duplication
+    if filename.startswith("output/"):
+        filename = filename[len("output/"):]
     path = root() / "output" / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
 
