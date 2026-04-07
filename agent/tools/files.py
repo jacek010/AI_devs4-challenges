@@ -1,4 +1,13 @@
 import workspace as ws
+import tiktoken
+
+
+def _count_tokens(text: str) -> int:
+    try:
+        enc = tiktoken.get_encoding("o200k_base")
+        return len(enc.encode(text))
+    except Exception:
+        return len(text) // 4
 
 
 def write_file(filename: str, content: str) -> str:
@@ -47,6 +56,37 @@ def list_workspace() -> str:
     return result
 
 
+def peek_file(filename: str, lines: int = 20) -> str:
+    """
+    Zwraca pierwsze N linii pliku bez ładowania całej treści.
+    Przydatne do sprawdzenia nagłówków, struktury i języka dokumentu
+    przed zdecydowaniem czy warto go w pełni odczytać.
+    """
+    lines = max(1, min(200, lines))
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in _IMAGE_EXTENSIONS:
+        return (
+            f"IMAGE_FILE_ERROR: '{filename}' to plik graficzny — "
+            "peek_file() obsługuje wyłącznie pliki tekstowe."
+        )
+    content = ws.find_file(filename)
+    if not content:
+        return f"FILE_NOT_FOUND: '{filename}' — sprawdź list_workspace() aby zobaczyć dostępne pliki."
+
+    all_lines = content.splitlines()
+    total_lines = len(all_lines)
+    total_tokens = _count_tokens(content)
+    preview = "\n".join(all_lines[:lines])
+    truncated = total_lines > lines
+    header = (
+        f"[PEEK: {filename} | {total_lines} linii | ~{total_tokens} tokenów"
+        + (" | (pokazano pierwsze " + str(lines) + " linii)" if truncated else "")
+        + "]\n"
+    )
+    ws.log("PEEK_FILE", filename, preview[:200])
+    return header + preview
+
+
 DEFINITIONS = [
     {
         "type": "function",
@@ -92,6 +132,31 @@ DEFINITIONS = [
                 "Zawsze wywołaj na początku — część plików może być z poprzedniej sesji."
             ),
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "peek_file",
+            "description": (
+                "Zwraca pierwsze N linii pliku (domyślnie 20) wraz z informacją o rozmiarze. "
+                "Używaj do skanowania nagłówków i struktury dokumentów bez ładowania całej treści. "
+                "Pozwala szybko ocenić język i zawartość pliku przed pełnym read_file."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {
+                        "type": "string",
+                        "description": "Nazwa pliku (obsługuje częściowe dopasowanie).",
+                    },
+                    "lines": {
+                        "type": "integer",
+                        "description": "Liczba linii do zwrócenia (1-200, domyślnie 20).",
+                    },
+                },
+                "required": ["filename"],
+            },
         },
     },
 ]

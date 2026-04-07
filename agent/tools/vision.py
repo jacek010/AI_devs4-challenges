@@ -113,7 +113,7 @@ def read_image(source: str, question: str = "", authorize: bool = False, no_cach
                      "image_url": {"url": f"data:{mime};base64,{img_b64}", "detail": "high"}},
                     {"type": "text", "text": prompt},
                 ]}],
-                max_tokens=2000,
+                max_completion_tokens=2000,
             )
             result = resp.choices[0].message.content
         except Exception as e:
@@ -186,7 +186,7 @@ def read_image(source: str, question: str = "", authorize: bool = False, no_cach
                  "image_url": {"url": f"data:{mime};base64,{img_b64}", "detail": "high"}},
                 {"type": "text", "text": prompt},
             ]}],
-            max_tokens=2000,
+            max_completion_tokens=2000,
         )
         result = resp.choices[0].message.content
     except Exception as e:

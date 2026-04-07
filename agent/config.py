@@ -16,6 +16,11 @@ HUB_VERIFY_URL = "https://hub.ag3nts.org/verify"
 
 
 # ─── Agent ────────────────────────────────────────────────────
-MAX_ITERATIONS = 40
+MAX_ITERATIONS = 60
 LLM_TEMPERATURE = 0.1
 LLM_MAX_TOKENS  = 4096
+
+# ─── Kompresja historii kontekstu ─────────────────────────────
+CONTEXT_WINDOW       = 120_000  # zakładany limit okna modelu (tokeny)
+COMPRESS_THRESHOLD   = 0.70     # kompresuj gdy historia przekroczy ten ułamek
+COMPRESS_KEEP_RECENT = 14       # n ostatnich wiad. (non-system) zawsze zachowuj

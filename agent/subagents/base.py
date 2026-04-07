@@ -127,7 +127,7 @@ class SubagentRunner:
                 tools=self.tool_definitions,
                 tool_choice="auto",
                 temperature=config.LLM_TEMPERATURE,
-                max_tokens=config.LLM_MAX_TOKENS,
+                max_completion_tokens=config.LLM_MAX_TOKENS,
             )
 
             msg = response.choices[0].message

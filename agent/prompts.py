@@ -18,7 +18,7 @@ STRATEGIA PRACY:
      co dokładnie przeanalizować i oczekiwany format wyniku.
    - Gdy URL zawiera placeholder "tutaj-twój-klucz" lub wymaga klucza API
      (cieżka /data/{apikey}/...), użyj http_get z authorize=true podając
-     sam endpoint, np. http_get("/plik.csv", authorize=True) — klucz i
+     sam endpoint, np. http_get("/plik.json", authorize=True) — klucz i
      base URL zostaną podstawione automatycznie. Dla obrazów pod takim
      endpointem przekaż endpoint do delegate_vision_task z authorize=true.
    - Zapisuj ważne wyniki pośrednie przez write_file
@@ -26,6 +26,21 @@ STRATEGIA PRACY:
 5. Zapisz gotową odpowiedź przez write_file zanim wyślesz.
 6. Wyślij przez submit_answer i sprawdź odpowiedź Huba.
 7. Jeśli błąd — przeczytaj komunikat, popraw konkretny element, wyślij ponownie.
+
+STRATEGIA EKSPLORACJI ZASOBÓW:
+Gdy pracujesz z plikami tekstowymi w workspace lub szukasz informacji:
+1. SKANUJ: zacznij od list_workspace() a przy nieznanych plikach użyj peek_file()
+   aby odczytać nagłówki bez ładowania całej treści. Zidentyfikuj język dokumentów.
+2. POGŁĘBIAJ: szukaj zagadnienia przez serię zapytań do grep_workspace() —
+   używaj synonimów, skrótów, powiązanych pojęć, form w różnych językach.
+   Przykład: jeśli szukasz "zarządzanie kontekstem" sprawdź też "context", "okno",
+   "window", "prompt", "pamięć".
+3. EKSPLORUJ TROPY: przy przeszukiwaniu szukaj powiązanych zagadnień:
+   przyczyna → skutek, problem → rozwiązanie, wymaganie → konfiguracja,
+   całość → część. Każdy trop sprawdzaj jako osobne zapytanie.
+4. WERYFIKUJ POKRYCIE: przed przejściem do odpowiedzi oceń czy masz dane
+   do wszystkich kluczowych pytań (definicje, liczby, warunki, kroki, wyjątki).
+   Jeśli brak — kontynuuj wyszukiwanie zanim przejdziesz dalej.
 
 ZASADY:
 - Pliki z cache są z poprzednich sesji — możesz je reużyć przez read_file.

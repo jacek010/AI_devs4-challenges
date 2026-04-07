@@ -1,5 +1,7 @@
 import json
 import re
+import datetime
+import tiktoken
 from openai import AzureOpenAI
 import config
 import workspace as ws
@@ -55,6 +57,150 @@ def _msg_has_tool_calls(msg) -> bool:
     return bool(getattr(msg, "tool_calls", None))
 
 
+# ─── Pomocniki kompresji ──────────────────────────────────────
+
+def _get_tiktoken_enc():
+    try:
+        return tiktoken.encoding_for_model(config.AZURE_DEPLOYMENT)
+    except KeyError:
+        return tiktoken.get_encoding("o200k_base")
+
+
+def _msg_role(msg) -> str:
+    if isinstance(msg, dict):
+        return msg.get("role", "")
+    return getattr(msg, "role", "")
+
+
+def _msg_content_str(msg) -> str:
+    """Serializuje content + tool_calls wiadomości do jednego stringa."""
+    if isinstance(msg, dict):
+        content = msg.get("content") or ""
+        tcs = msg.get("tool_calls") or []
+    else:
+        content = getattr(msg, "content", "") or ""
+        tcs = getattr(msg, "tool_calls", None) or []
+
+    parts = [str(content)] if content else []
+    for tc in tcs:
+        if isinstance(tc, dict):
+            fn = tc.get("function", {})
+            parts.append(f"[tool_call: {fn.get('name', '?')}({fn.get('arguments', '')})]")
+        else:
+            fn = getattr(tc, "function", None)
+            if fn:
+                parts.append(f"[tool_call: {getattr(fn, 'name', '?')}({getattr(fn, 'arguments', '')})]")
+    return "\n".join(parts)
+
+
+def _count_history_tokens(messages: list) -> int:
+    """Szacuje łączną liczbę tokenów całej historii (standard OpenAI: 4 overhead/msg)."""
+    enc = _get_tiktoken_enc()
+    total = 0
+    for msg in messages:
+        total += 4 + len(enc.encode(_msg_content_str(msg)))
+    return total
+
+
+def _compress_history(client, messages: list, compress_count: int, log) -> tuple[list, int]:
+    """
+    Zastępuje starszą część historii (wszystko poza _COMPRESS_KEEP_RECENT ostatnimi
+    wiadomościami non-system) streszczeniem wygenerowanym przez LLM.
+    Zachowuje pełną strukturę API (brak sierot role=tool).
+    """
+    system_msgs = [m for m in messages if _msg_role(m) == "system"]
+    non_system  = [m for m in messages if _msg_role(m) != "system"]
+
+    if len(non_system) <= config.COMPRESS_KEEP_RECENT:
+        return messages, compress_count   # za mało wiadomości — nie kompresuj
+
+    to_compress = non_system[:-config.COMPRESS_KEEP_RECENT]
+    to_keep     = non_system[-config.COMPRESS_KEEP_RECENT:]
+
+    # Usuń sieroty role=tool z początku to_keep (tool message musi mieć poprzednika assistant)
+    while to_keep and _msg_role(to_keep[0]) not in ("user", "assistant"):
+        to_keep.pop(0)
+
+    compress_count += 1
+    log(f"\n{_CY}{'─' * 55}{_R}")
+    log(f"{_CY}  🗜  KOMPRESJA HISTORII #{compress_count} — streszczam {len(to_compress)} starszych wiad.{_R}")
+    log(f"{_CY}{'─' * 55}{_R}")
+
+    # Zbuduj narrację ze starych wiadomości (ogranicz content każdej do 3000 znaków)
+    narrative_lines = []
+    for m in to_compress:
+        role    = _msg_role(m).upper()
+        content = _msg_content_str(m)[:3000]
+        narrative_lines.append(f"[{role}]: {content}")
+    narrative = "\n\n".join(narrative_lines)
+
+    compress_prompt = [
+        {"role": "system", "content": (
+            "Jesteś asystentem streszczającym historię rozmowy agenta AI. "
+            "Twoje streszczenie zastąpi pełną historię, więc musi być kompletne i precyzyjne."
+        )},
+        {"role": "user", "content": (
+            f"Poniżej znajduje się {len(to_compress)} wiadomości z historii agenta. "
+            "Stwórz zwięzłe, FAKTOGRAFICZNE streszczenie w formacie Markdown, które zachowa "
+            "wszystkie kluczowe informacje potrzebne do kontynuacji zadania.\n\n"
+            "Uwzględnij obowiązkowo:\n"
+            "1. **Co pobrano i przetworzono** — pliki, URL-e, dane z API\n"
+            "2. **Podjęte działania i ich efekty** — co wywołano, co zwróciło\n"
+            "3. **Kluczowe odpowiedzi systemu/Huba** — kody, komunikaty, odrzucone odpowiedzi\n"
+            "4. **Ustalony stan wiedzy** — co wiadomo na pewno o zadaniu\n"
+            "5. **Błędy i ślepe zaułki** — czego unikać\n"
+            "6. **Aktualny stan** — gdzie jesteśmy, co pozostało do zrobienia\n\n"
+            f"--- HISTORIA DO STRESZCZENIA ---\n{narrative}"
+        )},
+    ]
+
+    def _do_compress_call(**extra) -> str | None:
+        resp = client.chat.completions.create(
+            model=config.AZURE_DEPLOYMENT,
+            messages=compress_prompt,
+            max_completion_tokens=3000,
+            **extra,
+        )
+        choice = resp.choices[0]
+        if choice.finish_reason != "stop":
+            log(f"{_YL}  ⚠️  Kompresja: finish_reason={choice.finish_reason!r}{_R}")
+        return choice.message.content
+
+    try:
+        summary_text = _do_compress_call(temperature=0.1)
+    except Exception as e:
+        log(f"{_RE}  ⚠️  Kompresja: błąd API ({e}), ponawiam bez temperature...{_R}")
+        try:
+            summary_text = _do_compress_call()
+        except Exception as e2:
+            log(f"{_RE}  ❌  Kompresja: nie udało się ({e2}) — historia nie zostanie skompresowana.{_R}")
+            return messages, compress_count - 1
+
+    if not summary_text:
+        log(f"{_RE}  ❌  Kompresja: model zwrócił pustą treść — pomijam.{_R}")
+        return messages, compress_count - 1
+
+    filename = f"context_compression_{compress_count:02d}.md"
+    ws.output_write(filename, summary_text)
+    ws.log("CONTEXT_COMPRESSED", f"Kompresja #{compress_count} | zastąpiono {len(to_compress)} wiad. | plik: {filename}")
+    log(f"{_GR}  ✅ Streszczenie zapisano: output/{filename}{_R}")
+
+    summary_msg = {
+        "role":    "user",
+        "content": (
+            f"[STRESZCZENIE HISTORII #{compress_count} — zastępuje {len(to_compress)} starszych wiadomości]\n\n"
+            + summary_text
+            + "\n\n[Koniec streszczenia — kontynuuj zadanie od tego punktu]"
+        ),
+    }
+
+    new_messages = system_msgs + [summary_msg] + to_keep
+    log(f"{_CY}  Historia: {len(messages)} → {len(new_messages)} wiad. "
+        f"(~{_count_history_tokens(new_messages):,} tokenów){_R}")
+    log(f"{_CY}{'─' * 55}{_R}\n")
+    return new_messages, compress_count
+
+
 def _generate_summary(client, messages: list, log) -> str:
     """
     Generuje LLM-owe podsumowanie bieżącej sesji do zapisania przed resetem.
@@ -65,6 +211,8 @@ def _generate_summary(client, messages: list, log) -> str:
     # API wymaga, żeby każda wiadomość asystenta z tool_calls była poprzedzona
     # odpowiedziami tool. W tym miejscu ostatnia wiadomość asystenta (z wywołaniem
     # request_reset) jeszcze nie ma odpowiedzi — usuwamy ją przed wysłaniem.
+    # Historia jest już automatycznie streszczana przez _compress_history w pętli,
+    # więc nie ma potrzeby dodatkowego przycinania.
     clean_messages = list(messages)
     while clean_messages and _msg_has_tool_calls(clean_messages[-1]):
         clean_messages.pop()
@@ -85,13 +233,34 @@ def _generate_summary(client, messages: list, log) -> str:
             ),
         }
     ]
-    response = client.chat.completions.create(
-        model=config.AZURE_DEPLOYMENT,
-        messages=summary_messages,
-        temperature=0.1,
-        max_tokens=2000,
-    )
-    return response.choices[0].message.content or "(brak podsumowania)"
+
+    def _do_call(**extra_kwargs) -> str | None:
+        resp = client.chat.completions.create(
+            model=config.AZURE_DEPLOYMENT,
+            messages=summary_messages,
+            max_completion_tokens=4000,
+            **extra_kwargs,
+        )
+        choice = resp.choices[0]
+        finish = choice.finish_reason
+        content = choice.message.content
+        if finish != "stop":
+            log(f"{_YL}  ⚠️  Podsumowanie: finish_reason={finish!r}{_R}")
+        if not content:
+            log(f"{_RE}  ❌  Podsumowanie: model zwrócił pustą treść (finish_reason={finish!r}){_R}")
+        return content
+
+    try:
+        content = _do_call(temperature=0.1)
+    except Exception as e:
+        # Reasoning models (o3, gpt-5.x) nie obsługują temperature != 1 — retry bez parametru
+        log(f"\n{_RE}  ⚠️  Podsumowanie: błąd API ({e}), ponawiam bez temperature...{_R}")
+        try:
+            content = _do_call()
+        except Exception as e2:
+            log(f"\n{_RE}  ❌  Podsumowanie: nie udało się wygenerować ({e2}){_R}")
+            return f"(błąd generowania podsumowania: {e2})"
+    return content or "(brak podsumowania — model zwrócił pustą odpowiedź)"
 
 
 def run(task_text: str, verbose: bool = True) -> str | None:
@@ -114,7 +283,8 @@ def run(task_text: str, verbose: bool = True) -> str | None:
     log(f"{_CY}🤖 Model     : {config.AZURE_DEPLOYMENT}{_R}")
     log(f"{_CY}🔧 Narzędzia : {', '.join(TOOL_MAP.keys())}{_R}\n")
 
-    reset_count = 0
+    reset_count    = 0
+    compress_count = 0
     need_restart = True
     current_system_prompt = SYSTEM_PROMPT
 
@@ -122,7 +292,16 @@ def run(task_text: str, verbose: bool = True) -> str | None:
         need_restart = False
         messages = [
             {"role": "system", "content": current_system_prompt},
-            {"role": "user",   "content": f"Workspace gotowy. Treść zadania:\n\n{task_text}"},
+            {
+                "role": "user",
+                "content": (
+                    f"<context>\n"
+                    f"  <date>{datetime.date.today().isoformat()}</date>\n"
+                    f"  <workspace_files>{ws.ls()}</workspace_files>\n"
+                    f"</context>\n"
+                    f"<task>\n{task_text}\n</task>"
+                ),
+            },
         ]
 
         if reset_count > 0:
@@ -137,13 +316,18 @@ def run(task_text: str, verbose: bool = True) -> str | None:
             log(f"{_CY}  Iteracja {i} / {config.MAX_ITERATIONS}{_R}")
             log(f"{_CY}{'═' * 55}{_R}")
 
+            # Automatyczna kompresja historii gdy zbliżamy się do limitu okna kontekstu
+            tokens_now = _count_history_tokens(messages)
+            if tokens_now > config.CONTEXT_WINDOW * config.COMPRESS_THRESHOLD:
+                messages, compress_count = _compress_history(client, messages, compress_count, log)
+
             response = client.chat.completions.create(
                 model=config.AZURE_DEPLOYMENT,
                 messages=messages,
                 tools=TOOLS,
                 tool_choice="auto",
                 temperature=config.LLM_TEMPERATURE,
-                max_tokens=config.LLM_MAX_TOKENS,
+                max_completion_tokens=config.LLM_MAX_TOKENS,
             )
 
             msg = response.choices[0].message
