@@ -11,6 +11,10 @@ from tools.reset import RESET_SENTINEL
 
 _FLG_RE = re.compile(r'\{FLG:[^}]+\}')
 
+# ─── Progi Observational Memory ───────────────────────────────
+_OBSERVE_TOKENS = 30_000   # tokeny non-system → uruchamia Observer
+_REFLECT_TOKENS = 60_000   # tokeny dziennika  → uruchamia Reflector
+
 
 def _is_hub_success(result: str) -> bool:
     """Sprawdza czy odpowiedź Huba zawiera kod 0 (sukces)."""
@@ -201,6 +205,116 @@ def _compress_history(client, messages: list, compress_count: int, log) -> tuple
     return new_messages, compress_count
 
 
+def _observe(client, messages: list, journal: str, log) -> tuple[list, str]:
+    """
+    Observer (Observational Memory) — generuje zwięzły wpis-log do dziennika
+    ze starszych wiadomości, usuwa je z kontekstu i persystuje w pliku cross-session.
+    Uruchamiany gdy tokeny non-system przekroczą _OBSERVE_TOKENS.
+    """
+    system_msgs = [m for m in messages if _msg_role(m) == "system"]
+    non_system  = [m for m in messages if _msg_role(m) != "system"]
+
+    if len(non_system) <= config.COMPRESS_KEEP_RECENT:
+        return messages, journal
+
+    to_observe = non_system[:-config.COMPRESS_KEEP_RECENT]
+    to_keep    = non_system[-config.COMPRESS_KEEP_RECENT:]
+
+    # Usuń sieroty role=tool z początku to_keep
+    while to_keep and _msg_role(to_keep[0]) not in ("user", "assistant"):
+        to_keep.pop(0)
+
+    log(f"\n{_CY}{'─' * 55}{_R}")
+    log(f"{_CY}  👁  OBSERVER — generuję wpis do dziennika ({len(to_observe)} wiad.){_R}")
+    log(f"{_CY}{'─' * 55}{_R}")
+
+    narrative = "\n\n".join(
+        f"[{_msg_role(m).upper()}]: {_msg_content_str(m)[:2000]}"
+        for m in to_observe
+    )
+    observe_prompt = [
+        {"role": "system", "content": (
+            "Jesteś asystentem generującym zwięzłe wpisy do dziennika operacyjnego agenta AI. "
+            "Twój wpis zastąpi pełne wiadomości w kontekście, więc musi być precyzyjny."
+        )},
+        {"role": "user", "content": (
+            "Poniżej znajdują się wiadomości z sesji agenta. "
+            "Wygeneruj BARDZO ZWIĘZŁY dziennik-log (max 25 punktorów) zawierający wyłącznie kluczowe fakty:\n"
+            "- Co pobrano/przetworzono (URL-e, pliki, dane)\n"
+            "- Wyniki działań narzędzi\n"
+            "- Ustalenia i wnioski\n"
+            "- Błędy i czego unikać\n"
+            "- Aktualny stan zadania\n\n"
+            "Format: krótkie punktory, same fakty, bez narracji. "
+            "Każdy punktor zaczyna nową linię od '- '.\n\n"
+            f"--- WIADOMOŚCI ---\n{narrative}"
+        )},
+    ]
+
+    try:
+        resp = client.chat.completions.create(
+            model=config.AZURE_DEPLOYMENT,
+            messages=observe_prompt,
+            max_completion_tokens=1000,
+            temperature=0.1,
+        )
+        entry = resp.choices[0].message.content or ""
+    except Exception as e:
+        log(f"{_RE}  ⚠️  Observer: błąd API ({e}) — pomijam.{_R}")
+        return messages, journal
+
+    if entry:
+        ws.journal_append(entry)
+        journal = ws.journal_read()
+        log(f"{_GR}  ✅ Observer: wpis dodany do memory_journal.md{_R}")
+
+    new_messages = system_msgs + to_keep
+    log(f"{_CY}  Historia: {len(messages)} → {len(new_messages)} wiad.{_R}")
+    log(f"{_CY}{'─' * 55}{_R}\n")
+    return new_messages, journal
+
+
+def _reflect(client, journal: str, log) -> str:
+    """
+    Reflector (Observational Memory) — kompresuje dziennik gdy przekroczy
+    _REFLECT_TOKENS. Zachowuje esencję przy drastycznej redukcji rozmiaru.
+    """
+    log(f"\n{_CY}{'─' * 55}{_R}")
+    log(f"{_CY}  🔮 REFLECTOR — kompresuję dziennik pamięci{_R}")
+    log(f"{_CY}{'─' * 55}{_R}")
+
+    reflect_prompt = [
+        {"role": "system", "content": (
+            "Jesteś asystentem kompresującym dziennik operacyjny agenta AI. "
+            "Zmniejsz jego rozmiar zachowując wyłącznie informacje, które mogą być "
+            "potrzebne w przyszłych sesjach."
+        )},
+        {"role": "user", "content": (
+            "Poniżej jest dziennik operacyjny agenta. Skompresuj go do max 50 punktorów.\n"
+            "Zachowaj: kluczowe fakty, wyciągnięte wnioski, błędy do unikania, stan ogólny.\n"
+            "Odrzuć: szczegóły techniczne wywołań narzędzi, redundancje, stare nieistotne wpisy.\n\n"
+            f"--- DZIENNIK ---\n{journal}"
+        )},
+    ]
+
+    try:
+        resp = client.chat.completions.create(
+            model=config.AZURE_DEPLOYMENT,
+            messages=reflect_prompt,
+            max_completion_tokens=2000,
+            temperature=0.1,
+        )
+        compressed = resp.choices[0].message.content or journal
+    except Exception as e:
+        log(f"{_RE}  ⚠️  Reflector: błąd API ({e}) — dziennik bez zmian.{_R}")
+        return journal
+
+    ws.journal_write(compressed)
+    log(f"{_GR}  ✅ Reflector: dziennik skompresowany ({len(journal)} → {len(compressed)} znaków){_R}")
+    log(f"{_CY}{'─' * 55}{_R}\n")
+    return compressed
+
+
 def _generate_summary(client, messages: list, log) -> str:
     """
     Generuje LLM-owe podsumowanie bieżącej sesji do zapisania przed resetem.
@@ -288,19 +402,29 @@ def run(task_text: str, verbose: bool = True) -> str | None:
     need_restart = True
     current_system_prompt = SYSTEM_PROMPT
 
+    # Observational Memory — wczytaj dziennik cross-session
+    journal = ws.journal_read()
+
     while need_restart:
         need_restart = False
+
+        # Pierwsza wiadomość user — dołącz dziennik jeśli istnieje
+        context_block = (
+            f"<context>\n"
+            f"  <date>{datetime.date.today().isoformat()}</date>\n"
+            f"  <workspace_files>{ws.ls()}</workspace_files>\n"
+            f"</context>\n"
+        )
+        if journal:
+            context_block = (
+                f"<memory_journal>\n{journal}\n</memory_journal>\n\n"
+                + context_block
+            )
         messages = [
             {"role": "system", "content": current_system_prompt},
             {
                 "role": "user",
-                "content": (
-                    f"<context>\n"
-                    f"  <date>{datetime.date.today().isoformat()}</date>\n"
-                    f"  <workspace_files>{ws.ls()}</workspace_files>\n"
-                    f"</context>\n"
-                    f"<task>\n{task_text}\n</task>"
-                ),
+                "content": context_block + f"<task>\n{task_text}\n</task>",
             },
         ]
 
@@ -320,6 +444,17 @@ def run(task_text: str, verbose: bool = True) -> str | None:
             tokens_now = _count_history_tokens(messages)
             if tokens_now > config.CONTEXT_WINDOW * config.COMPRESS_THRESHOLD:
                 messages, compress_count = _compress_history(client, messages, compress_count, log)
+
+            # Observational Memory — Observer (lżejszy, częstszy)
+            non_system_msgs = [m for m in messages if _msg_role(m) != "system"]
+            non_system_tokens = _count_history_tokens(non_system_msgs)
+            if (non_system_tokens > _OBSERVE_TOKENS
+                    and len(non_system_msgs) > config.COMPRESS_KEEP_RECENT):
+                messages, journal = _observe(client, messages, journal, log)
+                # Reflector — gdy dziennik sam w sobie jest zbyt duży
+                enc = _get_tiktoken_enc()
+                if journal and len(enc.encode(journal)) > _REFLECT_TOKENS:
+                    journal = _reflect(client, journal, log)
 
             response = client.chat.completions.create(
                 model=config.AZURE_DEPLOYMENT,

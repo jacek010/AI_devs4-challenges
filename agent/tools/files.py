@@ -1,5 +1,15 @@
+import re
 import workspace as ws
 import tiktoken
+
+# ─── Regex do ekstrakcji z treści pliku ──────────────────────
+# Zdjęcia Markdown: ![alt](url)
+_MD_IMAGE_RE = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)\)')
+# Lokalne linki Markdown: [tekst](ścieżka) — bez https?:// i bez ![]()
+_LOCAL_LINK_RE = re.compile(
+    r'(?<!!)\[([^\]]+)\]\(((?!https?://)[^)]+\.[a-zA-Z0-9]{1,6})\)',
+    re.IGNORECASE,
+)
 
 
 def _count_tokens(text: str) -> int:
@@ -8,6 +18,56 @@ def _count_tokens(text: str) -> int:
         return len(enc.encode(text))
     except Exception:
         return len(text) // 4
+
+
+def _enrich_file_content(filename: str, content: str) -> str:
+    """
+    Wzbogaca treść pliku o:
+    - nagłówek z atrybucją źródła (#9)
+    - listę wykrytych obrazów Markdown (#10)
+    - listę wykrytych lokalnych linków do dokumentów (#19)
+    """
+    all_lines = content.splitlines()
+    total_lines = len(all_lines)
+    total_tokens = _count_tokens(content)
+    header = f"[PLIK: {filename} | {total_lines} linii | ~{total_tokens} tokenów]\n"
+
+    output = header + content
+
+    # Ekstrakcja obrazów Markdown (#10)
+    images = _MD_IMAGE_RE.findall(content)
+    if images:
+        img_lines = "\n".join(
+            f"  - [{alt or '(brak alt)'}]({url})" for alt, url in images
+        )
+        output += (
+            f"\n\n<markdown_images>\n"
+            f"Wykryto {len(images)} obraz(ów) — użyj delegate_vision_task aby przeanalizować:\n"
+            f"{img_lines}\n"
+            f"</markdown_images>"
+        )
+
+    # Wykrywanie lokalnych linków do dokumentów (#19)
+    local_links = _LOCAL_LINK_RE.findall(content)
+    # Ogranicz do 15 unikalnych ścieżek
+    seen = set()
+    unique_links = []
+    for text, path in local_links:
+        if path not in seen:
+            seen.add(path)
+            unique_links.append((text, path))
+        if len(unique_links) >= 15:
+            break
+    if unique_links:
+        link_lines = "\n".join(f"  - [{text}]({path})" for text, path in unique_links)
+        output += (
+            f"\n\n<related_documents>\n"
+            f"Wykryto odnośniki do innych dokumentów — warto je zbadać:\n"
+            f"{link_lines}\n"
+            f"</related_documents>"
+        )
+
+    return output
 
 
 def write_file(filename: str, content: str) -> str:
@@ -41,8 +101,8 @@ def read_file(filename: str) -> str:
         )
     result = ws.find_file(filename)
     if result:
-        ws.log("READ_FILE", filename, result)
-        return result
+        ws.log("READ_FILE", filename, result[:200])
+        return _enrich_file_content(filename, result)
     return f"FILE_NOT_FOUND: '{filename}' — sprawdź list_workspace() aby zobaczyć dostępne pliki."
 
 
@@ -84,7 +144,32 @@ def peek_file(filename: str, lines: int = 20) -> str:
         + "]\n"
     )
     ws.log("PEEK_FILE", filename, preview[:200])
-    return header + preview
+    output = header + preview
+
+    # Ekstrakcja obrazów i linków z podglądu (#10, #19)
+    images = _MD_IMAGE_RE.findall(preview)
+    if images:
+        img_lines = "\n".join(
+            f"  - [{alt or '(brak alt)'}]({url})" for alt, url in images
+        )
+        output += (
+            f"\n\n<markdown_images>\n"
+            f"Wykryto {len(images)} obraz(ów) w podglądzie:\n"
+            f"{img_lines}\n"
+            f"</markdown_images>"
+        )
+    local_links = _LOCAL_LINK_RE.findall(preview)
+    if local_links:
+        seen = set()
+        unique = [(t, p) for t, p in local_links if p not in seen and not seen.add(p)][:10]
+        link_lines = "\n".join(f"  - [{t}]({p})" for t, p in unique)
+        output += (
+            f"\n\n<related_documents>\n"
+            f"Wykryto lokalne odnośniki:\n"
+            f"{link_lines}\n"
+            f"</related_documents>"
+        )
+    return output
 
 
 DEFINITIONS = [

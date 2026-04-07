@@ -152,3 +152,32 @@ def ls() -> str:
             for f in files:
                 lines.append(f"   {f.name}  [{f.stat().st_size:,} B]")
     return "\n".join(lines) if lines else "Workspace pusty."
+
+
+# ═══════════════════════════════════════════════════════════════
+# Observational Memory — pamięć cross-session
+# ═══════════════════════════════════════════════════════════════
+
+def journal_path() -> Path:
+    """Ścieżka do pliku dziennika pamięci cross-session."""
+    return root() / "memory_journal.md"
+
+
+def journal_read() -> str:
+    """Czyta aktualny dziennik pamięci. Zwraca pusty string jeśli nie istnieje."""
+    p = journal_path()
+    return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+def journal_append(entry: str) -> None:
+    """Dopisuje nowy wpis-obserwację do dziennika (Observer)."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with journal_path().open("a", encoding="utf-8") as f:
+        f.write(f"\n---\n[{ts}]\n{entry.strip()}\n")
+    log("JOURNAL_APPEND", f"Nowy wpis do memory_journal.md ({len(entry)} znaków)")
+
+
+def journal_write(content: str) -> None:
+    """Nadpisuje dziennik skompresowaną wersją (Reflector)."""
+    journal_path().write_text(content, encoding="utf-8")
+    log("JOURNAL_WRITE", f"Przepisano memory_journal.md ({len(content)} znaków)")
