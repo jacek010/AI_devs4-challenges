@@ -26,7 +26,7 @@ def main():
     print(f"     ├── cache/       (pobrane zasoby)")
     print(f"     └── output/      (wyniki agenta)")
     print(f"{'═' * 55}")
-    print(f"  🤖 Subagenci: vision")
+    print(f"  🤖 Subagenci: vision, web, text")
     print(f"{'═' * 55}\n")
 
     runner.run(task_text)

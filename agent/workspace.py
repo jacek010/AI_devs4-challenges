@@ -169,11 +169,14 @@ def journal_read() -> str:
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
-def journal_append(entry: str) -> None:
-    """Dopisuje nowy wpis-obserwację do dziennika (Observer)."""
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def journal_append(entry: str, task_name: str = "") -> None:
+    """Dopisuje nowy wpis-obserwację do dziennika (Observer).
+    task_name: identyfikator zadania — pojawia się w metadanych wpisu (#26).
+    """
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    task_tag = f" | task: {task_name}" if task_name else ""
     with journal_path().open("a", encoding="utf-8") as f:
-        f.write(f"\n---\n[{ts}]\n{entry.strip()}\n")
+        f.write(f"\n---\n[{ts}{task_tag}]\n{entry.strip()}\n")
     log("JOURNAL_APPEND", f"Nowy wpis do memory_journal.md ({len(entry)} znaków)")
 
 

@@ -70,12 +70,27 @@ def _enrich_file_content(filename: str, content: str) -> str:
     return output
 
 
-def write_file(filename: str, content: str) -> str:
+def write_file(filename: str, content: str, expected_hash: str = "") -> str:
     """
     Zapisuje plik tekstowy do output/ w workspace.
     Używaj do zachowania deklaracji, wyników pośrednich przed wysłaniem.
     filename: sama nazwa pliku, np. 'declaration.txt'
+    expected_hash: opcjonalny MD5 pliku sprzed edycji — ochrona przed race condition (#25).
+      Jeśli plik istnieje i jego hash różni się od expected_hash, zapis jest blokowany.
     """
+    import hashlib as _hashlib
+    if expected_hash:
+        existing = ws.output_read(filename)
+        if existing is not None:
+            actual_hash = _hashlib.md5(existing.encode("utf-8")).hexdigest()
+            if actual_hash != expected_hash:
+                ws.log("WRITE_FILE_CONFLICT", f"output/{filename}", f"expected={expected_hash} actual={actual_hash}")
+                return (
+                    f"WRITE_CONFLICT: plik 'output/{filename}' został zmieniony przez inny proces.\n"
+                    f"  Oczekiwany hash: {expected_hash}\n"
+                    f"  Aktualny hash:   {actual_hash}\n"
+                    f"Aktualna treść pliku:\n{existing}"
+                )
     path = ws.output_write(filename, content)
     ws.log("WRITE_FILE", f"output/{filename}", content)
     return f"Zapisano: {path}"
@@ -179,13 +194,22 @@ DEFINITIONS = [
             "name": "write_file",
             "description": (
                 "Zapisuje plik tekstowy do output/ w workspace. "
-                "Używaj do zachowania deklaracji i wyników pośrednich."
+                "Używaj do zachowania deklaracji i wyników pośrednich. "
+                "Gdy chcesz nadpisać plik który mógł zmienić się równolegle, "
+                "podaj expected_hash (MD5 treści sprzed edycji) aby wykryć konflikt."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {"type": "string"},
                     "content": {"type": "string"},
+                    "expected_hash": {
+                        "type": "string",
+                        "description": (
+                            "Opcjonalny MD5 aktualnej treści pliku (sprzed edycji). "
+                            "Jeśli plik zmienił się od czasu odczytu, zapis zostanie zablokowany z ostrzeżeniem."
+                        ),
+                    },
                 },
                 "required": ["filename", "content"],
             },

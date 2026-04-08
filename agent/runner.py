@@ -205,7 +205,7 @@ def _compress_history(client, messages: list, compress_count: int, log) -> tuple
     return new_messages, compress_count
 
 
-def _observe(client, messages: list, journal: str, log) -> tuple[list, str]:
+def _observe(client, messages: list, journal: str, log, task_name: str = "") -> tuple[list, str]:
     """
     Observer (Observational Memory) — generuje zwięzły wpis-log do dziennika
     ze starszych wiadomości, usuwa je z kontekstu i persystuje w pliku cross-session.
@@ -264,7 +264,7 @@ def _observe(client, messages: list, journal: str, log) -> tuple[list, str]:
         return messages, journal
 
     if entry:
-        ws.journal_append(entry)
+        ws.journal_append(entry, task_name=task_name)
         journal = ws.journal_read()
         log(f"{_GR}  ✅ Observer: wpis dodany do memory_journal.md{_R}")
 
@@ -450,7 +450,7 @@ def run(task_text: str, verbose: bool = True) -> str | None:
             non_system_tokens = _count_history_tokens(non_system_msgs)
             if (non_system_tokens > _OBSERVE_TOKENS
                     and len(non_system_msgs) > config.COMPRESS_KEEP_RECENT):
-                messages, journal = _observe(client, messages, journal, log)
+                messages, journal = _observe(client, messages, journal, log, task_name=ws.root().name)
                 # Reflector — gdy dziennik sam w sobie jest zbyt duży
                 enc = _get_tiktoken_enc()
                 if journal and len(enc.encode(journal)) > _REFLECT_TOKENS:
