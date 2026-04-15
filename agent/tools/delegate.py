@@ -83,10 +83,13 @@ DEFINITIONS = [
             "description": (
                 "Deleguje podzadanie do wyspecjalizowanego subagenta. "
                 "Typy: 'web' (pobieranie stron, wyszukiwanie w sieci), "
-                "'text' (analiza plików workspace, grep). "
-                "Użyj gdy zadanie wymaga intensywnego przeszukiwania lub przetwarzania "
-                "i chcesz izolować ten etap od głównego kontekstu. "
-                "PRZED UżYCIEM w parametrze 'task' rozpisz: (1) kontekst zadania, "
+                "'text' (analiza plików workspace, grep, klasyfikacja LLM). "
+                "KLUCZOWE ZASTOSOWANIE — klasyfikacja LLM w partiach: gdy plan "
+                "wymaga klasyfikacji przez LLM (np. notatki operatora OK/ISSUE), "
+                "użyj tego narzędzia z agent_type='text', przekazując w 'task' "
+                "listę elementów do sklasyfikowania i oczekiwany format odpowiedzi "
+                "(np. '1:OK\\n2:ISSUE\\n...'). NIE używaj regex/heurystyk zamiast LLM. "
+                "PRZED UŻYCIEM w parametrze 'task' rozpisz: (1) kontekst zadania, "
                 "(2) cel podzadania, (3) oczekiwany format wyniku, "
                 "(4) dostępne zasoby. Subagent widzi TYLKO to co podasz w 'task'."
             ),

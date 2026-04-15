@@ -21,6 +21,16 @@ LLM_TEMPERATURE = 0.1
 LLM_MAX_TOKENS  = 4096
 
 # ─── Kompresja historii kontekstu ─────────────────────────────
-CONTEXT_WINDOW       = 120_000  # zakładany limit okna modelu (tokeny)
+CONTEXT_WINDOW       = 128_000  # zakładany limit okna modelu (tokeny)
 COMPRESS_THRESHOLD   = 0.70     # kompresuj gdy historia przekroczy ten ułamek
-COMPRESS_KEEP_RECENT = 14       # n ostatnich wiad. (non-system) zawsze zachowuj
+COMPRESS_KEEP_RECENT = 8        # n ostatnich wiad. (non-system) zawsze zachowuj
+
+# ─── Observational Memory ─────────────────────────────────────
+OBSERVE_TOKENS       = 60_000   # tokeny non-system → uruchamia Observer
+REFLECT_TOKENS       = 60_000   # tokeny dziennika  → uruchamia Reflector
+
+# ─── Cap odpowiedzi narzędzi ──────────────────────────────────
+MAX_TOOL_RESPONSE_TOKENS = 6_000  # maks. tokenów zwracanych przez pojedyncze narzędzie
+
+# ─── Listing workspace ────────────────────────────────────────
+LS_DIR_THRESHOLD     = 20       # max plików per podfolder przed skrótem

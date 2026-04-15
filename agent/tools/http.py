@@ -1,4 +1,6 @@
+import io
 import json
+import zipfile
 import requests
 import workspace as ws
 import config
@@ -54,6 +56,84 @@ def http_get(url: str, force_refresh: bool = False, authorize: bool = False) -> 
     ws.cache_write(key, content)
     ws.log("HTTP_GET", url, content)
     return content
+
+
+def http_download_zip(url: str, extract_to: str = "", force_refresh: bool = False) -> str:
+    """
+    Pobiera plik .zip z URL, rozpakowuje go do folderu cache/<extract_to>/
+    i zwraca listę wyodrębnionych plików wraz z ich ścieżkami w workspace.
+    Jeśli extract_to jest puste, nazwa folderu pochodzi z nazwy pliku .zip.
+    Wynik jest cache'owany — powtórne wywołanie zwróci istniejącą listę.
+    """
+    # Ustal nazwę folderu docelowego
+    zip_name = url.split("?")[0].rstrip("/").split("/")[-1]
+    folder_name = extract_to or zip_name.rsplit(".", 1)[0] or "zip_extracted"
+    marker_key = f"{folder_name}/.extracted"
+
+    if not force_refresh and ws.cache_read(marker_key) is not None:
+        ws.log("HTTP_DOWNLOAD_ZIP (cache)", url)
+    else:
+        try:
+            resp = requests.get(url, timeout=60)
+            resp.raise_for_status()
+        except Exception as e:
+            err = f"HTTP_DOWNLOAD_ZIP_ERROR: {e}"
+            ws.log("HTTP_DOWNLOAD_ZIP_ERROR", url, err)
+            return err
+
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(resp.content))
+        except zipfile.BadZipFile as e:
+            err = f"HTTP_DOWNLOAD_ZIP_ERROR: Nieprawidłowy plik ZIP — {e}"
+            ws.log("HTTP_DOWNLOAD_ZIP_ERROR", url, err)
+            return err
+
+        # Upewnij się, że folder docelowy istnieje przed rozpakowaniem
+        (ws.root() / "cache" / folder_name).mkdir(parents=True, exist_ok=True)
+
+        names = zf.namelist()
+        file_names = []
+        for name in names:
+            if name.endswith("/"):
+                # Wpis katalogowy — utwórz folder i pomiń
+                (ws.root() / "cache" / folder_name / name).mkdir(parents=True, exist_ok=True)
+                continue
+            data = zf.read(name)
+            dest = ws.root() / "cache" / folder_name / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data) if isinstance(data, bytes) else dest.write_text(data, encoding="utf-8")
+            file_names.append(name)
+
+        ws.cache_write(marker_key, "\n".join(file_names))
+        ws.log("HTTP_DOWNLOAD_ZIP", url, f"Rozpakowano {len(file_names)} plików do cache/{folder_name}/")
+
+    # Odczytaj listę plików z markera
+    all_files = (ws.cache_read(marker_key) or "").splitlines()
+    cache_dir = ws.root() / "cache" / folder_name
+
+    _MAX_LISTING = 20
+    if len(all_files) > _MAX_LISTING:
+        shown = all_files[:_MAX_LISTING]
+        listing = "\n".join(
+            f"  {i + 1:>5}. cache/{folder_name}/{name}"
+            for i, name in enumerate(shown)
+        )
+        listing += (
+            f"\n  … ({len(all_files) - _MAX_LISTING} kolejnych plików pominięto"
+            f" — łącznie {len(all_files)} plików."
+            f" Użyj list_workspace() lub grep_workspace() aby eksplorować.)"
+        )
+    else:
+        listing = "\n".join(
+            f"  {i + 1:>5}. cache/{folder_name}/{name}"
+            for i, name in enumerate(all_files)
+        )
+    summary = (
+        f"Rozpakowano {len(all_files)} plików z {url}\n"
+        f"Folder: {cache_dir}\n"
+        f"Pliki:\n{listing}"
+    )
+    return summary
 
 
 def http_post(url: str, payload: dict, save_as: str = "", authorize: bool = False) -> str:
@@ -148,6 +228,37 @@ DEFINITIONS = [
                     },
                 },
                 "required": ["url", "payload"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "http_download_zip",
+            "description": (
+                "Pobiera plik .zip z URL i rozpakowuje go do folderu cache/<extract_to>/. "
+                "Zwraca listę wyodrębnionych plików z ich ścieżkami w workspace. "
+                "Wynik jest cache'owany — powtórne wywołanie nie pobiera ponownie. "
+                "Użyj force_refresh=true aby wymusić ponowne pobranie."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Pełny URL do pliku .zip",
+                    },
+                    "extract_to": {
+                        "type": "string",
+                        "default": "",
+                        "description": (
+                            "Nazwa podfolderu w cache/ do którego trafią pliki. "
+                            "Jeśli puste, użyta zostanie nazwa pliku .zip bez rozszerzenia."
+                        ),
+                    },
+                    "force_refresh": {"type": "boolean", "default": False},
+                },
+                "required": ["url"],
             },
         },
     },

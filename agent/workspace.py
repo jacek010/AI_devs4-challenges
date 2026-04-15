@@ -129,28 +129,94 @@ def output_read(filename: str) -> str | None:
 
 
 def find_file(name: str) -> str | None:
-    """Szuka pliku w output/ i cache/ — najpierw dokładne dopasowanie, potem częściowe."""
+    """Szuka pliku w rootu workspace, output/ i cache/ — najpierw dokładne dopasowanie, potem częściowe (rekurencyjne)."""
+    # Szukaj w korzeniu workspace — m.in. task.md, history.md
+    exact_root = root() / name
+    if exact_root.exists() and exact_root.is_file():
+        return exact_root.read_text(encoding="utf-8")
     for subdir in ("output", "cache"):
         exact = root() / subdir / name
-        if exact.exists():
+        if exact.exists() and exact.is_file():
             return exact.read_text(encoding="utf-8")
+    # Częściowe dopasowanie — korzeń, output, cache
+    root_matches = sorted(p for p in root().iterdir() if p.is_file() and name.lower() in p.name.lower())
+    if root_matches:
+        return root_matches[0].read_text(encoding="utf-8")
     for subdir in ("output", "cache"):
-        matches = sorted((root() / subdir).glob(f"*{name}*"))
+        matches = sorted((root() / subdir).rglob(f"*{name}*"))
+        matches = [m for m in matches if m.is_file()]
         if matches:
             return matches[0].read_text(encoding="utf-8")
     return None
 
 
 def ls() -> str:
-    """Zwraca sformatowaną listę plików w workspace."""
+    """Zwraca sformatowaną listę plików w workspace (rekurencyjnie).
+
+    Pliki bezpośrednio w cache/ lub output/ — zawsze pełna lista.
+    Pliki w podfolderach: jeśli > LS_DIR_THRESHOLD, wyświetl skrót
+    z generalizacją (count, typy, zakres rozmiarów, kilka przykładów).
+    """
+    import config as _cfg
+    from collections import defaultdict
+
     lines = []
+
+    # Pliki bezpośrednio w rootu workspace (task.md, history.md, memory_journal.md, ...)
+    root_files = sorted(f for f in root().iterdir() if f.is_file())
+    if root_files:
+        lines.append("📄 (korzeń workspace):")
+        for f in root_files:
+            lines.append(f"   {f.name}  [{f.stat().st_size:,} B]")
+
     for subdir in ("cache", "output"):
-        files = sorted((root() / subdir).iterdir())
-        files = [f for f in files if f.is_file()]
-        if files:
-            lines.append(f"📁 {subdir}/ ({len(files)} plików):")
-            for f in files:
-                lines.append(f"   {f.name}  [{f.stat().st_size:,} B]")
+        base = root() / subdir
+        all_files = sorted(f for f in base.rglob("*") if f.is_file())
+        if not all_files:
+            continue
+
+        lines.append(f"📁 {subdir}/ ({len(all_files)} plików):")
+
+        # Pogrupuj: klucz = pierwsza część ścieżki względnej (podfolder lub '.')
+        groups: dict[str, list[Path]] = defaultdict(list)
+        for f in all_files:
+            rel = f.relative_to(base)
+            key = rel.parts[0] if len(rel.parts) > 1 else "."
+            groups[key].append(f)
+
+        for key in sorted(groups):
+            group_files = groups[key]
+            if key == ".":
+                # Pliki bezpośrednio w subdir — zawsze pełna lista
+                for f in group_files:
+                    rel = f.relative_to(base)
+                    lines.append(f"   {rel}  [{f.stat().st_size:,} B]")
+            elif len(group_files) <= _cfg.LS_DIR_THRESHOLD:
+                # Mały podfolder — pełna lista
+                for f in group_files:
+                    rel = f.relative_to(base)
+                    lines.append(f"   {rel}  [{f.stat().st_size:,} B]")
+            else:
+                # Duży podfolder — skrót z generalizacją
+                sizes = [f.stat().st_size for f in group_files]
+                exts: dict[str, int] = defaultdict(int)
+                for f in group_files:
+                    exts[f.suffix.lower() or "(brak)"] += 1
+                ext_summary = ", ".join(
+                    f"{cnt}x {ext}" for ext, cnt in sorted(exts.items(), key=lambda x: -x[1])
+                )
+                lines.append(
+                    f"   📂 {key}/ — {len(group_files)} plików ({ext_summary})"
+                    f" | rozmiar: {min(sizes):,}–{max(sizes):,} B"
+                )
+                # 3 pierwsze + 3 ostatnie przykłady
+                examples_head = [f.relative_to(base) for f in group_files[:3]]
+                examples_tail = [f.relative_to(base) for f in group_files[-3:]]
+                head_str = ", ".join(str(p) for p in examples_head)
+                tail_str = ", ".join(str(p) for p in examples_tail)
+                lines.append(f"        Przykłady: {head_str}")
+                lines.append(f"                   … {tail_str}")
+
     return "\n".join(lines) if lines else "Workspace pusty."
 
 

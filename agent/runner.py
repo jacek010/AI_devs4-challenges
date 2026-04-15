@@ -11,9 +11,9 @@ from tools.reset import RESET_SENTINEL
 
 _FLG_RE = re.compile(r'\{FLG:[^}]+\}')
 
-# ─── Progi Observational Memory ───────────────────────────────
-_OBSERVE_TOKENS = 30_000   # tokeny non-system → uruchamia Observer
-_REFLECT_TOKENS = 60_000   # tokeny dziennika  → uruchamia Reflector
+# ─── Progi Observational Memory (wartości w config.py) ────────
+_OBSERVE_TOKENS = None   # zastąpiono przez config.OBSERVE_TOKENS
+_REFLECT_TOKENS = None   # zastąpiono przez config.REFLECT_TOKENS
 
 
 def _is_hub_success(result: str) -> bool:
@@ -59,6 +59,21 @@ def _msg_has_tool_calls(msg) -> bool:
     if isinstance(msg, dict):
         return bool(msg.get("tool_calls"))
     return bool(getattr(msg, "tool_calls", None))
+
+
+def _truncate_tool_response(text: str) -> str:
+    """Obcina odpowiedź narzędzia do config.MAX_TOOL_RESPONSE_TOKENS."""
+    enc = _get_tiktoken_enc()
+    tokens = enc.encode(text)
+    limit = config.MAX_TOOL_RESPONSE_TOKENS
+    if len(tokens) <= limit:
+        return text
+    truncated = enc.decode(tokens[:limit])
+    removed = len(tokens) - limit
+    return (
+        truncated
+        + f"\n\n[OBCIĘTO — pominięto {removed} tokenów. Użyj grep_workspace() lub list_workspace() aby eksplorować dane.]"
+    )
 
 
 # ─── Pomocniki kompresji ──────────────────────────────────────
@@ -325,11 +340,23 @@ def _generate_summary(client, messages: list, log) -> str:
     # API wymaga, żeby każda wiadomość asystenta z tool_calls była poprzedzona
     # odpowiedziami tool. W tym miejscu ostatnia wiadomość asystenta (z wywołaniem
     # request_reset) jeszcze nie ma odpowiedzi — usuwamy ją przed wysłaniem.
-    # Historia jest już automatycznie streszczana przez _compress_history w pętli,
-    # więc nie ma potrzeby dodatkowego przycinania.
     clean_messages = list(messages)
     while clean_messages and _msg_has_tool_calls(clean_messages[-1]):
         clean_messages.pop()
+
+    # Ogranicz kontekst wysyłany do LLM: system + ostatnie _SUMMARY_KEEP_RECENT non-system.
+    # Bez tego przy dużych sesjach (vision, wiele iteracji) LLM zacina się na ogromnym
+    # kontekście. Pełna historia jest i tak w workspace (history.md, cache, output).
+    _SUMMARY_KEEP_RECENT = 12
+    system_msgs   = [m for m in clean_messages if _msg_role(m) == "system"]
+    non_sys_msgs  = [m for m in clean_messages if _msg_role(m) != "system"]
+    if len(non_sys_msgs) > _SUMMARY_KEEP_RECENT:
+        log(f"{_CY}  (podsumowanie: przycinam historię {len(non_sys_msgs)} → {_SUMMARY_KEEP_RECENT} wiad. non-system){_R}")
+        non_sys_msgs = non_sys_msgs[-_SUMMARY_KEEP_RECENT:]
+        # Usuń ewentualne sieroty role=tool z początku
+        while non_sys_msgs and _msg_role(non_sys_msgs[0]) not in ("user", "assistant"):
+            non_sys_msgs.pop(0)
+    clean_messages = system_msgs + non_sys_msgs
 
     summary_messages = clean_messages + [
         {
@@ -377,11 +404,12 @@ def _generate_summary(client, messages: list, log) -> str:
     return content or "(brak podsumowania — model zwrócił pustą odpowiedź)"
 
 
-def run(task_text: str, verbose: bool = True) -> str | None:
+def run(task_text: str, verbose: bool = True, interactive: bool = False) -> str | None:
     """
     Główna pętla agenta. Przyjmuje treść zadania i wykonuje je do końca.
     Zwraca ostatnią wiadomość agenta.
     Obsługuje wielokrotne resety kontekstu po akceptacji użytkownika.
+    Gdy interactive=True, agent prezentuje planowany krok i czeka na akceptację.
     """
     client = AzureOpenAI(
         azure_endpoint=config.AZURE_ENDPOINT,
@@ -448,12 +476,12 @@ def run(task_text: str, verbose: bool = True) -> str | None:
             # Observational Memory — Observer (lżejszy, częstszy)
             non_system_msgs = [m for m in messages if _msg_role(m) != "system"]
             non_system_tokens = _count_history_tokens(non_system_msgs)
-            if (non_system_tokens > _OBSERVE_TOKENS
+            if (non_system_tokens > config.OBSERVE_TOKENS
                     and len(non_system_msgs) > config.COMPRESS_KEEP_RECENT):
                 messages, journal = _observe(client, messages, journal, log, task_name=ws.root().name)
                 # Reflector — gdy dziennik sam w sobie jest zbyt duży
                 enc = _get_tiktoken_enc()
-                if journal and len(enc.encode(journal)) > _REFLECT_TOKENS:
+                if journal and len(enc.encode(journal)) > config.REFLECT_TOKENS:
                     journal = _reflect(client, journal, log)
 
             response = client.chat.completions.create(
@@ -494,11 +522,46 @@ def run(task_text: str, verbose: bool = True) -> str | None:
                 })
                 continue
 
+            # ─── Tryb interaktywny — pokaż plan i poczekaj na akceptację ───
+            if interactive:
+                log(f"\n\033[1;34m{'╔' + '═' * 53 + '╗'}\033[0m")
+                log(f"\033[1;34m║  🎛  TRYB INTERAKTYWNY — planowany krok\033[0m")
+                log(f"\033[1;34m{'╚' + '═' * 53 + '╝'}\033[0m")
+                for tc in msg.tool_calls:
+                    name_preview = tc.function.name
+                    try:
+                        args_preview = json.loads(tc.function.arguments)
+                        args_str = json.dumps(args_preview, ensure_ascii=False, indent=2)
+                    except Exception:
+                        args_str = tc.function.arguments
+                    log(f"\033[1;34m  🔧 Narzędzie : {name_preview}\033[0m")
+                    for line in args_str.splitlines():
+                        log(f"\033[1;34m     {line}\033[0m")
+                log(f"\033[1;34m{'─' * 55}\033[0m")
+                log(f"\033[1m  [Enter / t/tak/y/yes] aby zatwierdzić\033[0m")
+                log(f"\033[1m  lub wpisz sugestię/dodatkowe informacje dla agenta:\033[0m")
+                log(f"\033[1m> \033[0m", end="", flush=True)
+                user_input = input().strip()
+                if user_input and user_input.lower() not in ("t", "tak", "y", "yes"):
+                    ws.log("INTERACTIVE_FEEDBACK", f"Iter {i}: użytkownik: {user_input[:200]}")
+                    # Usuń asystenta (z tool_calls) — musi iść PRZED dołożeniem
+                    # wiadomości user, bo messages[-1] to właśnie ten asystent.
+                    # Gdybyśmy najpierw dodali user i dopiero potem pop(), usunęlibyśmy
+                    # user zamiast asystenta, pozostawiając tool_calls bez odpowiedzi.
+                    messages.pop()
+                    messages.append({
+                        "role":    "user",
+                        "content": f"[Informacja od użytkownika przed wykonaniem kroku]: {user_input}",
+                    })
+                    log(f"\033[1;34m  ↩️  Przekazuję sugestię do agenta — ponawiam planowanie.\033[0m\n")
+                    continue
+                log(f"\033[1;34m  ✅ Zatwierdzono — wykonuję krok.\033[0m\n")
+
             # Wykonaj narzędzia
             for tc in msg.tool_calls:
                 name  = tc.function.name
                 args  = json.loads(tc.function.arguments)
-                r_str = str(_call_tool(name, args, log))
+                r_str = _truncate_tool_response(str(_call_tool(name, args, log)))
 
                 # Sukces od Huba — zakończ z kodem 0
                 if name == "submit_answer" and _is_hub_success(r_str):

@@ -42,7 +42,7 @@ def grep_workspace(pattern: str, scope: str = "both", max_results: int = 50) -> 
     for d in dirs:
         if not d.exists():
             continue
-        for filepath in sorted(d.iterdir()):
+        for filepath in sorted(d.rglob("*")):
             if not filepath.is_file():
                 continue
             ext = filepath.suffix.lstrip(".").lower()

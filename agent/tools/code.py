@@ -7,9 +7,13 @@ import workspace as ws
 
 def python_eval(code: str) -> str:
     """
-    Wykonuje kod Pythona — obliczenia, formatowanie, parsowanie tekstu.
-    Dostępne moduły: json, re, math, datetime. Wyniki przez print().
+    Wykonuje kod Pythona — obliczenia, formatowanie, parsowanie tekstu, operacje na plikach.
+    Dostępne moduły: json, re, math, datetime, pathlib, glob, os. Wyniki przez print().
+    Zmienna _workspace_root (Path) wskazuje na korzeń workspace — używaj jej do ścieżek.
+    Funkcja write_file(filename, content) zapisuje plik do output/.
     """
+    from tools.files import write_file as _write_file
+
     allowed = {
         "__builtins__": __builtins__,
         "json":         json,
@@ -24,6 +28,12 @@ def python_eval(code: str) -> str:
         "string":       __import__("string"),
         "decimal":      __import__("decimal"),
         "statistics":   __import__("statistics"),
+        "pathlib":      __import__("pathlib"),
+        "Path":         __import__("pathlib").Path,
+        "glob":         __import__("glob"),
+        "os":           __import__("os"),
+        "_workspace_root": ws.root(),
+        "write_file":   _write_file,
     }
     buf = io.StringIO()
     try:
@@ -43,9 +53,14 @@ DEFINITIONS = [
         "function": {
             "name": "python_eval",
             "description": (
-                "Wykonuje kod Python (obliczenia, formatowanie, parsowanie, kodowanie). "
+                "Wykonuje kod Python (obliczenia, formatowanie, parsowanie, kodowanie, operacje na plikach). "
                 "Dostępne: json, re, math, datetime, base64, collections, itertools, "
-                "hashlib, urllib.parse, string, decimal, statistics. Wyniki przez print()."
+                "hashlib, urllib.parse, string, decimal, statistics, pathlib, Path, glob, os. "
+                "Zmienna _workspace_root (pathlib.Path) wskazuje na korzeń workspace — "
+                "ZAWSZE używaj jej jako bazy ścieżek, np.: "
+                "_workspace_root / 'cache' / 'sensors' / '0001.json'. "
+                "Funkcja write_file(filename, content) zapisuje plik tekstowy do output/. "
+                "Wyniki przez print()."
             ),
             "parameters": {
                 "type": "object",
