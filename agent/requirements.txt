@@ -3,3 +3,6 @@ openai
 dotenv
 tiktoken
 opencv-python
+textual>=0.79.0
+fastapi
+uvicorn[standard]

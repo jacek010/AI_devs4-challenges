@@ -1,5 +1,6 @@
 # tools/ask.py
 import workspace as ws
+import io_interface
 
 _ASK = "\033[1;36m"  # bold cyan
 _R   = "\033[0m"
@@ -15,8 +16,8 @@ def ask_user(question: str) -> str:
     print(f"{_ASK}  ❓ PYTANIE DO UŻYTKOWNIKA:{_R}")
     print(f"{_ASK}  {question}{_R}")
     print(f"{_ASK}{'─' * 55}{_R}")
-    print(f"{_ASK}  Twoja odpowiedź: {_R}", end="")
-    answer = input().strip()
+    print(f"{_ASK}  Twoja odpowiedź: {_R}", end="", flush=True)
+    answer = io_interface.prompt_user(question, io_interface.PT_ASK_USER)
     ws.log("ASK_USER", question[:200], answer[:200])
     return answer
 

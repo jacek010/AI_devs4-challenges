@@ -1,6 +1,7 @@
 # tools/plan.py
 import re
 import workspace as ws
+import io_interface
 
 _CY = "\033[1;36m"   # bold cyan
 _BL = "\033[1;34m"   # bold blue
@@ -46,9 +47,12 @@ def propose_plan(plan: str) -> str:
     print(f"{_GR}  Zaakceptuj plan wciskając ENTER lub wpisz 'tak'/'ok'.{_R}")
     print(f"{_GR}  Aby zadać pytanie lub dodać uwagi — wpisz je poniżej.{_R}")
     print(f"{_CY}{'─' * 55}{_R}")
-    print(f"{_CY}  Twoja odpowiedź: {_R}", end="")
+    print(f"{_CY}  Twoja odpowiedź: {_R}", end="", flush=True)
 
-    answer = input().strip()
+    answer = io_interface.prompt_user(
+        "Zaakceptuj plan [Enter/tak/ok] lub wpisz uwagi:",
+        io_interface.PT_PLAN,
+    )
     answer_lower = answer.lower()
 
     if answer_lower in _ACCEPT_TOKENS:

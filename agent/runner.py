@@ -5,6 +5,8 @@ import tiktoken
 from openai import AzureOpenAI
 import config
 import workspace as ws
+import io_interface
+from io_interface import AgentStoppedException
 from prompts import SYSTEM_PROMPT
 from tools import TOOLS, TOOL_MAP
 from tools.reset import RESET_SENTINEL
@@ -464,6 +466,20 @@ def run(task_text: str, verbose: bool = True, interactive: bool = False) -> str 
         reset_triggered = False  # ustawiane gdy reset potwierdzony (break z for-i)
 
         for i in range(1, config.MAX_ITERATIONS + 1):
+            # ─── Sprawdzenie stop flags na początku każdej iteracji ───
+            if io_interface.is_force_stop_requested():
+                log(f"\n{_RE}{'═' * 55}{_R}")
+                log(f"{_RE}  ⛔  FORCE STOP — natychmiastowe przerwanie.{_R}")
+                log(f"{_RE}{'═' * 55}{_R}")
+                ws.log("FORCE_STOP", f"Przerwano w iteracji {i}")
+                return None
+            if io_interface.is_stop_requested():
+                log(f"\n{_YL}{'═' * 55}{_R}")
+                log(f"{_YL}  🛑  GRACEFUL STOP — zatrzymuję agenta.{_R}")
+                log(f"{_YL}{'═' * 55}{_R}")
+                ws.log("GRACEFUL_STOP", f"Zatrzymano w iteracji {i}")
+                return None
+
             log(f"\n{_CY}{'═' * 55}{_R}")
             log(f"{_CY}  Iteracja {i} / {config.MAX_ITERATIONS}{_R}")
             log(f"{_CY}{'═' * 55}{_R}")
@@ -541,7 +557,11 @@ def run(task_text: str, verbose: bool = True, interactive: bool = False) -> str 
                 log(f"\033[1m  [Enter / t/tak/y/yes] aby zatwierdzić\033[0m")
                 log(f"\033[1m  lub wpisz sugestię/dodatkowe informacje dla agenta:\033[0m")
                 log(f"\033[1m> \033[0m", end="", flush=True)
-                user_input = input().strip()
+                user_input = io_interface.prompt_user(
+                    f"Narzędzie: {', '.join(tc.function.name for tc in msg.tool_calls)}\n"
+                    "[Enter/t/tak/y/yes] = zatwierdź  lub wpisz sugestię:",
+                    io_interface.PT_INTERACTIVE,
+                )
                 if user_input and user_input.lower() not in ("t", "tak", "y", "yes"):
                     ws.log("INTERACTIVE_FEEDBACK", f"Iter {i}: użytkownik: {user_input[:200]}")
                     # Usuń asystenta (z tool_calls) — musi iść PRZED dołożeniem
@@ -602,8 +622,11 @@ def run(task_text: str, verbose: bool = True, interactive: bool = False) -> str 
                         log(f"{_YL}  …[podsumowanie skrócone w podglądzie]{_R}")
                     log(f"{_YL}{'─' * 55}{_R}")
 
-                    log(f"\n{_B}Czy akceptujesz reset kontekstu? [t/n]: {_R}", end="")
-                    answer = input().strip().lower()
+                    log(f"\n{_B}Czy akceptujesz reset kontekstu? [t/n]: {_R}", end="", flush=True)
+                    answer = io_interface.prompt_user(
+                        "Czy akceptujesz reset kontekstu?",
+                        io_interface.PT_RESET,
+                    ).lower()
 
                     if answer in ("t", "tak", "y", "yes"):
                         current_system_prompt = (
@@ -643,6 +666,53 @@ def run(task_text: str, verbose: bool = True, interactive: bool = False) -> str 
             return None
 
     return None
+
+
+# Wrapper wywoływany z wątku UI — łapie AgentStoppedException na najwyższym poziomie
+def run_in_thread(
+    task_text: str,
+    verbose: bool = True,
+    interactive: bool = False,
+    textual_io: "io_interface.TextualIO | None" = None,
+) -> str | None:
+    """
+    Wrapper uruchamiany w osobnym wątku przez UI.
+    Obsługuje AgentStoppedException (force stop) i zawsze sygnalizuje UI zakończenie.
+    """
+    import sys
+    orig_stdout = sys.stdout
+    ui_stream = None
+    if textual_io is not None:
+        ui_stream = io_interface.UIStream(textual_io)
+        sys.stdout = ui_stream
+
+    try:
+        result = run(task_text, verbose=verbose, interactive=interactive)
+        if textual_io is not None:
+            if textual_io.stop_event.is_set():
+                textual_io.signal_stopped()
+            else:
+                textual_io.signal_done()
+        return result
+    except AgentStoppedException:
+        log_fn = textual_io.enqueue_log if textual_io else print
+        log_fn(f"\n⛔  Wątek agenta przerwany (force stop).")
+        if textual_io is not None:
+            textual_io.signal_stopped()
+        return None
+    except Exception as exc:
+        log_fn = textual_io.enqueue_log if textual_io else print
+        log_fn(f"\n❌  Nieoczekiwany błąd agenta: {exc}")
+        if textual_io is not None:
+            textual_io.signal_done()
+        raise
+    finally:
+        if ui_stream is not None:
+            try:
+                ui_stream.flush()
+            except Exception:
+                pass
+        sys.stdout = orig_stdout
 
 
 def _call_tool(name: str, args: dict, log) -> str:
